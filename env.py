@@ -1,189 +1,141 @@
-# import sqlite3
-# import shutil
-# import os
-# from models import Action, Observation, State
-
-# class SentinelEnv:
-#     def get_row_count(self):
-#         conn = sqlite3.connect(self.active_path)
-#         count = conn.execute("SELECT COUNT(*) FROM accounts").fetchone()[0]
-#         conn.close()
-#         return count
-#     def __init__(self):
-#         self.template_path = "template.db"
-#         self.active_path = "active.db"
-#         self.state = State()
-
-#     def get_checksum(self):
-#         """Calculates the total balance of all accounts to ensure data integrity."""
-#         conn = sqlite3.connect(self.active_path)
-#         cursor = conn.cursor()
-#         cursor.execute("SELECT SUM(balance) FROM accounts")
-#         total = cursor.fetchone()[0] or 0.0
-#         conn.close()
-#         return total
-
-#     def reset(self) -> Observation:
-#         """Starts a fresh session by copying the Ground Truth database."""
-#         if os.path.exists(self.active_path):
-#             os.remove(self.active_path)
-        
-#         shutil.copy(self.template_path, self.active_path)
-        
-#         # Reset internal state
-#         self.state = State()
-        
-#         return Observation(
-#             success=True,
-#             result_set=[{"message": "Environment reset. Ready for tasks."}],
-#             current_checksum=self.get_checksum(),
-#             unprocessed_chaos_events=0
-#         )
-
-#     def step(self, action: Action) -> tuple[Observation, float, bool]:
-#         """Executes the agent's SQL command and returns the outcome."""
-#         self.state.step_count += 1
-#         error = None
-#         results = None
-#         success = True
-
-#         try:
-#             conn = sqlite3.connect(self.active_path)
-#             # Enable WAL mode for better concurrency
-#             conn.execute("PRAGMA journal_mode=WAL;")
-#             cursor = conn.cursor()
-
-#             # Execute the command
-#             cursor.execute(action.sql_command)
-            
-#             # If it's a SELECT, fetch data. If it's UPDATE/DELETE, commit it.
-#             if action.action_type == "query":
-#                 if action.sql_command.strip().upper().startswith("SELECT"):
-#                     columns = [description[0] for description in cursor.description]
-#                     results = [dict(zip(columns, row)) for row in cursor.fetchall()]
-#             elif action.action_type == "commit":
-#                 conn.commit()
-#             elif action.action_type == "rollback":
-#                 conn.rollback()
-
-#             conn.close()
-#         except Exception as e:
-#             success = False
-#             error = str(e)
-
-#         # Calculate Reward (Basic logic: negative reward for errors)
-#         reward = -0.1 if not success else 0.0
-        
-#         # Check if we hit the step limit
-#         if self.state.step_count >= self.state.max_steps:
-#             self.state.is_done = True
-
-#         obs = Observation(
-#             success=success,
-#             result_set=results,
-#             error_message=error,
-#             current_checksum=self.get_checksum()
-#         )
-        
-#         return obs, reward, self.state.is_done, {}
-
 import sqlite3
-import shutil
+import threading
+import time
 import os
-from models import Action, Observation, State
+from models import Observation, Action
 
 class SentinelEnv:
     def __init__(self):
+        self.db_path = "active.db"
         self.template_path = "template.db"
-        self.active_path = "active.db"
-        self.state = State()
+        self.task_id = "audit_easy"
+        self.stop_monkey = threading.Event()
+        self.max_steps = 20
+        self.current_step = 0
 
-    def get_row_count(self):
-        """Returns total records in accounts table."""
-        try:
-            conn = sqlite3.connect(self.active_path)
-            count = conn.execute("SELECT COUNT(*) FROM accounts").fetchone()[0]
-            conn.close()
-            return count
-        except:
-            return 0
-
-    def get_checksum(self):
-        """Calculates total balance to ensure data integrity."""
-        try:
-            conn = sqlite3.connect(self.active_path)
-            cursor = conn.cursor()
-            cursor.execute("SELECT SUM(balance) FROM accounts")
-            total = cursor.fetchone()[0] or 0.0
-            conn.close()
-            return total
-        except:
-            return 0.0
-
-    def reset(self) -> Observation:
-        """Starts a fresh session by copying the Ground Truth database."""
-        if os.path.exists(self.active_path):
-            os.remove(self.active_path)
+    def reset(self, task_id: str = "audit_easy") -> Observation:
+        """Mandatory OpenEnv Reset: Prepares the task and resets the DB."""
+        self.task_id = task_id
+        self.current_step = 0
         
-        shutil.copy(self.template_path, self.active_path)
-        self.state = State()
+        # 1. Stop any existing chaos monkey threads
+        self.stop_monkey.set()
+        time.sleep(0.1) # Brief pause for thread cleanup
         
-        # We call the helpers directly inside the return
-        return Observation(
-            success=True,
-            result_set=[{"message": "Environment reset. Ready for tasks."}],
-            error_message=None,
-            current_checksum=self.get_checksum(),
-            unprocessed_chaos_events=0,
-            row_count=self.get_row_count()
-        )
-
-    def step(self, action: Action) -> tuple[Observation, float, bool, dict]:
-        """Executes the agent's SQL command and returns the outcome."""
-        self.state.step_count += 1
-        error = None
-        results = None
-        success = True
-
-        try:
-            conn = sqlite3.connect(self.active_path)
-            conn.execute("PRAGMA journal_mode=WAL;")
-            cursor = conn.cursor()
-
-            cursor.execute(action.sql_command)
-
-            command_upper = action.sql_command.strip().upper()
+        # 2. Reset the Active DB from the Template
+        if not os.path.exists(self.template_path):
+            raise FileNotFoundError("template.db not found. Run setup_db.py first!")
             
-            if action.action_type == "query":
-                if command_upper.startswith("SELECT"):
-                    columns = [description[0] for description in cursor.description]
-                    results = [dict(zip(columns, row)) for row in cursor.fetchall()]
-                # Automatically commit for UPDATE/INSERT/DELETE if type is query
-                else:
-                    conn.commit()
-            elif action.action_type == "commit":
+        with open(self.template_path, 'rb') as f_src, open(self.db_path, 'wb') as f_dst:
+            f_dst.write(f_src.read())
+            
+        # 3. Trigger Chaos Monkey if Task is 'Hard'
+        if task_id == "audit_hard":
+            self.stop_monkey.clear()
+            threading.Thread(target=self._run_chaos_monkey, daemon=True).start()
+            
+        return self.state()
+
+    def state(self) -> Observation:
+        """Mandatory OpenEnv Method: Returns current state without a turn."""
+        return self._get_current_observation()
+
+    def _run_chaos_monkey(self):
+        """Background thread that corrupts data during Task 3."""
+        while not self.stop_monkey.is_set():
+            try:
+                conn = sqlite3.connect(self.db_path)
+                # Monkey subtracts a random amount from a random account every 2 seconds
+                conn.execute(
+                    "UPDATE accounts SET balance = balance - 5.0 "
+                    "WHERE id = (SELECT id FROM accounts ORDER BY RANDOM() LIMIT 1)"
+                )
                 conn.commit()
-            elif action.action_type == "rollback":
-                conn.rollback()
+                conn.close()
+            except:
+                pass
+            time.sleep(2)
 
-            conn.close()
+    def _get_current_observation(self) -> Observation:
+        """Queries the DB to build the standard Observation model."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        try:
+            # Get basic metrics
+            cursor.execute("SELECT SUM(balance) as checksum, COUNT(*) as rows FROM accounts")
+            result = cursor.fetchone()
+            checksum = result['checksum'] if result['checksum'] else 0.0
+            row_count = result['rows']
+            
+            # Identify "Broken" rows for the Agent to see
+            cursor.execute("SELECT * FROM accounts WHERE balance < 0 LIMIT 5")
+            sample_results = [dict(row) for row in cursor.fetchall()]
+            
+            return Observation(
+                current_checksum=float(checksum),
+                row_count=int(row_count),
+                result_set=sample_results,
+                success=True
+            )
         except Exception as e:
-            success = False
-            error = str(e)
+            return Observation(
+                current_checksum=0.0,
+                row_count=0,
+                result_set=[],
+                success=False,
+                error_message=str(e)
+            )
+        finally:
+            conn.close()
 
-        reward = -0.1 if not success else 0.0
+    def _calculate_reward(self) -> float:
+        """The Programmatic Grader: Normalizes integrity to 0.0 - 1.0 range."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
         
-        if self.state.step_count >= self.state.max_steps:
-            self.state.is_done = True
+        # Check for integrity violations
+        cursor.execute("SELECT COUNT(*) FROM accounts WHERE balance < 0")
+        neg_balances = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM (SELECT id FROM accounts GROUP BY id HAVING COUNT(*) > 1)")
+        duplicates = cursor.fetchone()[0]
+        conn.close()
 
-        # Ensure all fields from models.py Observation are here
-        obs = Observation(
-            success=success,
-            result_set=results,
-            error_message=error,
-            current_checksum=self.get_checksum(),
-            unprocessed_chaos_events=0,
-            row_count=self.get_row_count()
-        )
+        total_issues = neg_balances + duplicates
         
-        return obs, reward, self.state.is_done, {}
+        # Scaler/Meta Requirement: Reward must be a float (0.0 to 1.0)
+        # We assume 50 initial issues as a baseline for 100% corruption
+        score = max(0.0, 1.0 - (total_issues / 50.0))
+        return float(score)
+
+    def step(self, action: Action):
+        """Executes an action and returns (observation, reward, done, info)."""
+        self.current_step += 1
+        error_msg = None
+        
+        if action.action_type == "query":
+            try:
+                conn = sqlite3.connect(self.db_path)
+                conn.execute(action.sql_command)
+                conn.commit()
+                conn.close()
+            except Exception as e:
+                error_msg = str(e)
+
+        obs = self.state()
+        if error_msg:
+            obs.success = False
+            obs.error_message = error_msg
+            
+        reward = self._calculate_reward()
+        
+        # Mission ends if everything is fixed or max steps reached
+        done = (reward >= 1.0) or (self.current_step >= self.max_steps)
+        
+        # Kill the monkey if the task is finished
+        if done:
+            self.stop_monkey.set()
+            
+        return obs, reward, done, {}
