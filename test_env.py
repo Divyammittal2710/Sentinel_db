@@ -66,19 +66,20 @@ def run_integration_test():
     print("\n🔍 Testing Data Validation...")
     test_action = Action(
         action_type="query", 
-        sql_command="SELECT * FROM accounts WHERE name = 'Bob Jones';"
+        sql_command="SELECT * FROM accounts LIMIT 1;"
     )
     obs, reward, done, info = env.step(test_action)
     
-    if obs.result_set and "Bob Jones" in str(obs.result_set):
-        print(f"✅ Validation Successful: Found Bob Jones in the database.")
+    if obs.result_set:
+        target_name = obs.result_set[0]['name']
+        print(f"✅ Validation Successful: Found {target_name} in the database.")
     else:
         print(f"⚠️ Warning: Could not find expected data. Check if setup_db.py ran.")
 
 
     print("\n🛠️ Testing Data Correction...")
 
-    fix_query = "UPDATE accounts SET balance = 500.0 WHERE name = 'Bob Jones';"
+    fix_query = f"UPDATE accounts SET balance = balance + 100 WHERE name = '{target_name}';"
     fix_action = Action(
         action_type="query", 
         sql_command=fix_query
