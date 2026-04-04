@@ -1,4 +1,5 @@
 openenv-core
 pydantic
-fastapi
-uvicorn
+python-dotenv
+faker
+openai
