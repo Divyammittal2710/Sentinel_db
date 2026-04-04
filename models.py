@@ -33,6 +33,9 @@ class Observation(BaseModel):
     unprocessed_chaos_events: int = Field(
         0, description="Number of background transactions added by the Chaos Monkey."
     )
+    row_count: int = Field(
+        0, description="Total number of accounts currently in the database."
+    )
 
 class State(BaseModel):
     """
