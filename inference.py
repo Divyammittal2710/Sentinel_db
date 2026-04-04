@@ -1,69 +1,85 @@
 import os
 import json
+import time
 from dotenv import load_dotenv
-from groq import Groq
+from openai import OpenAI
 from models import Observation, Action
+from env import SentinelEnv
 
-# 1. Load the API Key from your .env file
+# 1. Mandatory Environment Configuration
 load_dotenv()
-api_key = os.getenv("GROQ_API_KEY")
+API_BASE_URL = os.getenv("API_BASE_URL")
+MODEL_NAME = os.getenv("MODEL_NAME")
+HF_TOKEN = os.getenv("HF_TOKEN")
 
-if not api_key:
-    raise ValueError("❌ GROQ_API_KEY not found in .env file!")
+client = OpenAI(
+    base_url=API_BASE_URL,
+    api_key=HF_TOKEN
+)
 
-# 2. Initialize the Groq Client
-client = Groq(api_key=api_key)
+# Mandatory Task IDs from openenv.yaml
+TASKS = ["audit_easy", "audit_medium", "audit_hard"]
 
-class SentinelAgent:
-    def __init__(self, model_name="llama-3.3-70b-versatile"):
-        self.model_name = model_name
-        # The System Prompt defines the AI's "personality" and rules
-        self.system_prompt = """
-        You are the Sentinel-DB Autonomous Auditor. Your goal is to maintain financial integrity.
-        
-        RULES:
-        1. You only output valid SQL commands for SQLite.
-        2. You must fix: Negative balances, Duplicate IDs, and Invalid Statuses.
-        3. Table name is 'accounts'. Columns are: 'id', 'name', 'balance', 'status'.
-        4. For 'Audit' tasks, start by querying the database to find anomalies.
-        5. Respond ONLY with a JSON object matching this structure:
-           {"action_type": "query", "sql_command": "SELECT * FROM accounts WHERE balance < 0;"}
-        """
+def run_inference():
+    # MANDATORY LOGGING: START
+    print("[START]")
+    
+    env = SentinelEnv()
 
-    def get_action(self, observation: Observation) -> Action:
-        """Processes the current database state and returns the next SQL action."""
-        
-        # We pass the 'Eyes' of the agent (Checksum, Rows, and previous Results)
-        prompt = f"""
-        --- CURRENT DATABASE STATE ---
-        Total Rows: {observation.row_count}
-        Current Checksum: {observation.current_checksum}
-        Previous Query Results: {observation.result_set}
-        Last Error: {observation.error_message}
-
-        --- TASK ---
-        Identify any anomalies (negative balances or duplicates) and fix them. 
-        What is your next SQL move?
-        """
-
+    for task_id in TASKS:
         try:
-            # Call Groq API with JSON Mode enabled
-            chat_completion = client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": prompt}
-                ],
-                model=self.model_name,
-                response_format={"type": "json_object"}
-            )
-
-            # 3. Parse the response
-            raw_response = chat_completion.choices[0].message.content
+            # 2. Reset with specific task_id
+            obs = env.reset(task_id=task_id)
             
-            # This validates the LLM response against your Pydantic Action model
-            return Action.model_validate_json(raw_response)
+            system_prompt = f"""
+            You are the Sentinel-DB Auditor. Currently performing task: {task_id}.
+            Table: 'accounts'. Columns: 'id', 'name', 'balance', 'status'.
+            Goal: Fix negative balances and reconcile duplicate IDs.
+            Respond ONLY in JSON format: {{"action_type": "query", "sql_command": "..."}}
+            """
+
+            done = False
+            step_count = 0
+            max_steps = 10 # 10 steps per task is plenty for Groq speed
+
+            while not done and step_count < max_steps:
+                step_count += 1
+                
+                prompt = (
+                    f"Task: {task_id}\n"
+                    f"Step: {step_count}\n"
+                    f"Row Count: {obs.row_count}\n"
+                    f"Checksum: {obs.current_checksum}\n"
+                    f"Sample Data: {obs.result_set}\n"
+                    f"Error: {obs.error_message}"
+                )
+
+                response = client.chat.completions.create(
+                    model=MODEL_NAME,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt}
+                    ],
+                    response_format={"type": "json_object"}
+                )
+
+                raw_content = response.choices[0].message.content
+                action = Action.model_validate_json(raw_content)
+
+                # Execute environment step
+                obs, reward, done, info = env.step(action)
+
+                # MANDATORY LOGGING: STEP
+                # The task_id is included to show the grader which task is scoring
+                print(f"[STEP] {task_id}_{step_count}: Action={action.action_type}, Reward={reward:.2f}, Done={done}")
+                
+                time.sleep(0.5)
 
         except Exception as e:
-            print(f"⚠️ Agent Brain Error: {e}")
-            # Fallback action if the LLM fails to respond correctly
-            return Action(action_type="query", sql_command="SELECT * FROM accounts LIMIT 5;")
+            print(f"Inference Error on {task_id}: {str(e)}")
+
+    # MANDATORY LOGGING: END
+    print("[END]")
+
+if __name__ == "__main__":
+    run_inference()
