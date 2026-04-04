@@ -9,8 +9,4 @@ env/
 *.db-wal
 .DS_Store
 Thumbs.db
-<<<<<<< HEAD
-.ipynb_checkpoints/
-=======
-.ipynb_checkpoints/
->>>>>>> d918a3a22530efede55386911a29c16967c5fe52
+
