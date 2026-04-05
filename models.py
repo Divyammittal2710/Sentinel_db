@@ -4,15 +4,11 @@ from typing import Optional, List, Dict, Any, Literal
 class Action(BaseModel):
     """
     The command the AI agent sends to the environment.
-    We use 'Literal' to force the agent to choose a specific mode.
+    We use a single 'query' field for maximum LLM reliability.
     """
-    action_type: Literal["query", "commit", "rollback"] = Field(
+    query: str = Field(
         ..., 
-        description="Type of DB operation. 'query' to run SQL, 'commit' to save, 'rollback' to undo."
-    )
-    sql_command: str = Field(
-        ..., 
-        description="The SQL string to execute. Example: 'UPDATE accounts SET balance = balance - 100 WHERE id = 1'"
+        description="The raw SQL string to execute. Example: 'UPDATE accounts SET balance = balance - 100 WHERE id = 1'"
     )
 
 class Observation(BaseModel):

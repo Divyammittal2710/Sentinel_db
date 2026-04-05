@@ -15,14 +15,14 @@ def create_expanded_db():
 
     cursor.execute("""
         CREATE TABLE accounts (
-            id INTEGER PRIMARY KEY,
+            id INTEGER,
             name TEXT NOT NULL,
             balance REAL NOT NULL,
             status TEXT NOT NULL
         )
     """)
 
-    print(f"🚀 Generating 1,000 rows of FinTech data in {DB_FILE}...")
+    print(f" Generating 1,000 rows of FinTech data in {DB_FILE}...")
 
     accounts = []
 
@@ -49,7 +49,7 @@ def create_expanded_db():
 
     random.shuffle(accounts)
 
-    cursor.executemany("INSERT OR REPLACE INTO accounts VALUES (?, ?, ?, ?)", accounts)
+    cursor.executemany("INSERT INTO accounts VALUES (?, ?, ?, ?)", accounts)
 
     conn.commit()
 
@@ -60,9 +60,9 @@ def create_expanded_db():
     total_checksum = cursor.fetchone()[0] or 0.0
 
     print("-" * 30)
-    print(f"✅ Success! {DB_FILE} is ready.")
-    print(f"📊 Total Rows: {row_count}")
-    print(f"💰 Initial Checksum: {round(total_checksum, 2)}")
+    print(f"Success! {DB_FILE} is ready.")
+    print(f"Total Rows: {row_count}")
+    print(f"Initial Checksum: {round(total_checksum, 2)}")
     print("-" * 30)
 
     conn.close()
@@ -71,4 +71,4 @@ if __name__ == "__main__":
     try:
         create_expanded_db()
     except ImportError:
-        print("❌ Error: 'faker' library not found. Run 'pip install faker' first.")
+        print("Error: 'faker' library not found. Run 'pip install faker' first.")

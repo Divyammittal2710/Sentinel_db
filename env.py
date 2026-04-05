@@ -5,13 +5,14 @@ import os
 from models import Observation, Action
 
 class SentinelEnv:
-    def __init__(self):
+    def __init__(self, task_id: str = "audit_easy"):
         self.db_path = "active.db"
         self.template_path = "template.db"
-        self.task_id = "audit_easy"
+        self.task_id = task_id  # Set from the app initialization
         self.stop_monkey = threading.Event()
         self.max_steps = 20
         self.current_step = 0
+        self.reset(task_id=self.task_id)
 
     def reset(self, task_id: str = "audit_easy") -> Observation:
         """Mandatory OpenEnv Reset: Prepares the task and resets the DB."""
@@ -105,8 +106,7 @@ class SentinelEnv:
 
         total_issues = neg_balances + duplicates
         
-        # Scaler/Meta Requirement: Reward must be a float (0.0 to 1.0)
-        # We assume 50 initial issues as a baseline for 100% corruption
+        # Reward must be a float (0.0 to 1.0)
         score = max(0.0, 1.0 - (total_issues / 50.0))
         return float(score)
 
@@ -115,10 +115,11 @@ class SentinelEnv:
         self.current_step += 1
         error_msg = None
         
-        if action.action_type == "query":
+        # Matching the 'query' field from our Action model
+        if action.query:
             try:
                 conn = sqlite3.connect(self.db_path)
-                conn.execute(action.sql_command)
+                conn.execute(action.query)
                 conn.commit()
                 conn.close()
             except Exception as e:
@@ -134,8 +135,12 @@ class SentinelEnv:
         # Mission ends if everything is fixed or max steps reached
         done = (reward >= 1.0) or (self.current_step >= self.max_steps)
         
-        # Kill the monkey if the task is finished
         if done:
             self.stop_monkey.set()
             
-        return obs, reward, done, {}
+        # Standard info dict for OpenEnv compliance
+        return obs, reward, done, {"error": error_msg}
+
+    def close(self):
+        """Ensures the thread is killed when the environment is closed."""
+        self.stop_monkey.set()
