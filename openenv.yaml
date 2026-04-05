@@ -1,0 +1,20 @@
+version: "1.0.0"
+name: "sentinel-db"
+description: "Autonomous FinTech database auditor for maintaining financial integrity."
+entrypoint: "inference.py"
+
+tasks:
+  - id: "audit_easy"
+    name: "Integrity Restoration"
+    difficulty: "easy"
+  - id: "audit_medium"
+    name: "Duplicate Reconciliation"
+    difficulty: "medium"
+  - id: "audit_hard"
+    name: "Chaos Resilience"
+    difficulty: "hard"
+
+runtime:
+  engine: "python-3.10"
+  memory_limit: "8GB"
+  cpu_limit: 2

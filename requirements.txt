@@ -3,3 +3,7 @@ pydantic
 python-dotenv
 faker
 openai
+fastapi
+uvicorn
+httpx
+
