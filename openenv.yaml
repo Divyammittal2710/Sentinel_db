@@ -7,12 +7,15 @@ tasks:
   - id: "audit_easy"
     name: "Integrity Restoration"
     difficulty: "easy"
+    description: "Fix a static corrupted financial database with negative balances, duplicate IDs, and invalid statuses."
   - id: "audit_medium"
     name: "Duplicate Reconciliation"
     difficulty: "medium"
+    description: "Fix a corrupted database while a slow chaos monkey drains balances and injects duplicates every 8 seconds."
   - id: "audit_hard"
     name: "Chaos Resilience"
     difficulty: "hard"
+    description: "Fix a corrupted database while a chaos monkey aggressively drains balances every 2 seconds."
 
 runtime:
   engine: "python-3.10"
