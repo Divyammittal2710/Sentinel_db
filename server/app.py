@@ -43,7 +43,7 @@ async def state():
 def main():
     """This is what 'openenv validate' looks for in your pyproject.toml."""
     uvicorn.run(
-        "server.app:app", 
+        "app:app", 
         host="0.0.0.0", 
         port=7860, 
         reload=False
