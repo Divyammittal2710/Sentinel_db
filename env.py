@@ -58,36 +58,41 @@ class SentinelEnv:
             time.sleep(2)
 
     def _get_current_observation(self) -> Observation:
-        """Queries the DB to build the standard Observation model."""
+        """Improved: Now identifies BOTH negatives and duplicates for the Agent."""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
         try:
-            # Get basic metrics
             cursor.execute("SELECT SUM(balance) as checksum, COUNT(*) as rows FROM accounts")
             result = cursor.fetchone()
             checksum = result['checksum'] if result['checksum'] else 0.0
             row_count = result['rows']
             
-            # Identify "Broken" rows for the Agent to see
-            cursor.execute("SELECT * FROM accounts WHERE balance < 0 LIMIT 5")
-            sample_results = [dict(row) for row in cursor.fetchall()]
+            # CRITICAL FIX: Look for both types of corruption
+            # 1. Find negative balances
+            cursor.execute("SELECT * FROM accounts WHERE balance < 0 LIMIT 3")
+            neg_samples = [dict(row) for row in cursor.fetchall()]
+            
+            # 2. Find duplicate IDs (This was the missing piece!)
+            cursor.execute("SELECT id, COUNT(*) as count FROM accounts GROUP BY id HAVING count > 1 LIMIT 3")
+            dup_samples = [dict(row) for row in cursor.fetchall()]
+            
+            # Combine them so the Agent knows EXACTLY what is broken
+            report = {
+                "negative_balance_samples": neg_samples,
+                "duplicate_id_samples": dup_samples,
+                "current_reward": self._calculate_reward()
+            }
             
             return Observation(
                 current_checksum=float(checksum),
                 row_count=int(row_count),
-                result_set=sample_results,
+                result_set=[report], # The Agent now sees the full picture
                 success=True
             )
         except Exception as e:
-            return Observation(
-                current_checksum=0.0,
-                row_count=0,
-                result_set=[],
-                success=False,
-                error_message=str(e)
-            )
+            return Observation(current_checksum=0.0, row_count=0, result_set=[], success=False, error_message=str(e))
         finally:
             conn.close()
 
@@ -111,34 +116,26 @@ class SentinelEnv:
         return float(score)
 
     def step(self, action: Action):
-        """Executes an action and returns (observation, reward, done, info)."""
+        """Improved: Uses executescript to allow multiple fixes in one turn."""
         self.current_step += 1
         error_msg = None
         
-        # Matching the 'query' field from our Action model
         if action.query:
             try:
                 conn = sqlite3.connect(self.db_path)
-                conn.execute(action.query)
-                conn.commit()
+                # executescript handles multiple statements and auto-commits
+                conn.executescript(action.query) 
                 conn.close()
             except Exception as e:
                 error_msg = str(e)
 
         obs = self.state()
-        if error_msg:
-            obs.success = False
-            obs.error_message = error_msg
-            
         reward = self._calculate_reward()
-        
-        # Mission ends if everything is fixed or max steps reached
         done = (reward >= 1.0) or (self.current_step >= self.max_steps)
         
         if done:
             self.stop_monkey.set()
             
-        # Standard info dict for OpenEnv compliance
         return obs, reward, done, {"error": error_msg}
 
     def close(self):

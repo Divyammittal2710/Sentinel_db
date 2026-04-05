@@ -15,10 +15,12 @@ API_BASE_URL = os.getenv("API_BASE_URL", "https://api.groq.com/openai/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
 TASK_NAME = os.getenv("SENTINEL_TASK", "audit_hard")
 BENCHMARK = "sentinel-db-v1"
+# Added to satisfy the mandatory checklist in the image
+LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME", "sentinel-db-img") 
 
 # 2. Hyperparameters
 MAX_STEPS = 10
-TEMPERATURE = 0.1  # Low temperature for precise SQL generation
+TEMPERATURE = 0.1  
 MAX_TOKENS = 150
 
 # 3. Mandatory Logging Functions
@@ -28,33 +30,38 @@ def log_start(task: str, env: str, model: str) -> None:
 def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
     error_val = error if error else "null"
     done_val = str(done).lower()
-    # Ensure action string has no newlines to keep log on one line
     action_clean = action.replace("\n", " ").strip()
+    # Formatting reward to 2 decimal places as per spec
     print(f"[STEP] step={step} action={action_clean} reward={reward:.2f} done={done_val} error={error_val}", flush=True)
 
 def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    print(f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}", flush=True)
+    # Formatting score to 3 decimal places as per sample example
+    print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
 
-# 4. LLM Interaction Logic
+# 4. LLM Interaction Logic (Your Prompt is already 10/10)
 def get_model_query(client: OpenAI, observation: str) -> str:
     system_prompt = textwrap.dedent("""
-    [STRICT ROLE]
-    You are a Database Auditor. You ONLY output one raw SQL statement.
-    You will be given an observation. If 'current_checksum' is not perfect or duplicates exist, you MUST continue fixing.
+        [STRICT ROLE]
+        You are a Database Auditor. You ONLY output one raw SQL statement.
+        You will be given an observation. If 'current_checksum' is not perfect or duplicates exist, you MUST continue fixing.
 
-    [DATABASE SCHEMA]
-    - Table: 'accounts'
-    - Columns: id (INT), name (TEXT), balance (REAL), status (TEXT)
+        [DATABASE SCHEMA]
+        - Table: 'accounts'
+        - Columns: id (INT), name (TEXT), balance (REAL), status (TEXT)
 
-    [MISSION PRIORITY]
-    1. Fix Negatives: UPDATE accounts SET balance = 0 WHERE balance < 0;
-    2. Fix Duplicates: DELETE FROM accounts WHERE rowid NOT IN (SELECT MIN(rowid) FROM accounts GROUP BY id);
-    3. Fix Status: UPDATE accounts SET status = 'ACTIVE' WHERE status != 'ACTIVE';
+        [STRICT CONSTRAINTS]
+        - NEVER use 'SELECT' to count or check data. I already provide the observation.
+        - You MUST only use 'UPDATE' or 'DELETE' to change the data.
+        - NO markdown code blocks (no ```). No explanations.
+        - Output EXACTLY ONE line of SQL.
 
-    [TERMINATION RULE]
-    - If and ONLY if there are 0 negative balances, 0 duplicates, and all statuses are 'ACTIVE', output: SELECT 1;
-    - Never repeat 'SELECT 1;' if the reward you receive is less than 1.0.
+        [REQUIRED ACTION SEQUENCE]
+        Check the observation and act in this order:
+        1. FIX NEGATIVES: UPDATE accounts SET balance = 0 WHERE balance < 0;
+        2. FIX DUPLICATES: DELETE FROM accounts WHERE rowid NOT IN (SELECT MIN(rowid) FROM accounts GROUP BY id);
+        3. FIX STATUS: UPDATE accounts SET status = 'ACTIVE' WHERE status != 'ACTIVE';
+        4. IF ALL ISSUES ARE FIXED: SELECT 1;
     """).strip()
 
     try:
@@ -73,10 +80,7 @@ def get_model_query(client: OpenAI, observation: str) -> str:
 
 # 5. Main Execution Loop
 async def main() -> None:
-    # Initialize OpenAI Client (Pointed to Groq or Meta Endpoint)
     client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
-    
-    # Initialize Environment
     env = SentinelEnv(task_id=TASK_NAME)
     
     history_rewards: List[float] = []
@@ -88,36 +92,30 @@ async def main() -> None:
 
     try:
         # Reset Environment to get initial observation
-        obs = env.reset()
+        obs = env.reset(task_id=TASK_NAME)
         
         for step in range(1, MAX_STEPS + 1):
-            # Get Action from LLM
             sql_query = get_model_query(client, str(obs))
-            
-            # Execute Action in Environment
             obs, reward, done, info = env.step(Action(query=sql_query))
             
-            # Tracking
             history_rewards.append(reward)
             steps_taken = step
             error = info.get("error")
 
-            # Mandatory STEP Log
             log_step(step=step, action=sql_query, reward=reward, done=done, error=error)
 
             if done:
                 break
 
-        # Final Evaluation
+        # Final Evaluation: Score must be [0, 1]
         final_score = history_rewards[-1] if history_rewards else 0.0
-        success = final_score >= 0.95  # Success if integrity is restored
+        success = final_score >= 0.95 
 
     except Exception as global_exc:
-        print(f"[DEBUG] Execution Error: {global_exc}")
+        # Important: The [END] log MUST be emitted even on exception
+        pass 
     finally:
-        # Cleanup
         env.close()
-        # Mandatory END Log
         log_end(success=success, steps=steps_taken, score=final_score, rewards=history_rewards)
 
 if __name__ == "__main__":
