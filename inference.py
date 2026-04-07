@@ -4,6 +4,7 @@ load_dotenv()
 import asyncio
 import os
 import textwrap
+import sys
 from typing import List, Optional
 from openai import OpenAI
 from env import SentinelEnv
@@ -13,7 +14,10 @@ from models import Action
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY") or os.getenv("OPENAI_API_KEY")
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.groq.com/openai/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
-TASK_NAME = os.getenv("SENTINEL_TASK", "audit_hard")
+if len(sys.argv) > 1 and not sys.argv[1].startswith('-'):
+    TASK_NAME = sys.argv[1]
+else:
+    TASK_NAME = os.getenv("SENTINEL_TASK", "audit_easy")
 BENCHMARK = "sentinel-db-v1"
 
 # 2. Hyperparameters
