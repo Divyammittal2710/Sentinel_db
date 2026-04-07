@@ -12,7 +12,6 @@ class SentinelEnv:
         self.stop_monkey = threading.Event()
         self.max_steps = 20
         self.current_step = 0
-        self.reset(task_id=self.task_id)
 
     def reset(self, task_id: str = "audit_easy") -> Observation:
         """Mandatory OpenEnv Reset: Prepares the task and resets the DB."""
