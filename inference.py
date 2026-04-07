@@ -1,3 +1,126 @@
+# from dotenv import load_dotenv
+# load_dotenv()
+
+# import asyncio
+# import os
+# import textwrap
+# from typing import List, Optional
+# from openai import OpenAI
+# from env import SentinelEnv
+# from models import Action
+
+# # 1. Environment Configuration (Mandatory for the Grader)
+# API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY") or os.getenv("OPENAI_API_KEY")
+# API_BASE_URL = os.getenv("API_BASE_URL", "https://api.groq.com/openai/v1")
+# MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
+# TASK_NAME = os.getenv("SENTINEL_TASK", "audit_hard")
+# BENCHMARK = "sentinel-db-v1"
+# # Added to satisfy the mandatory checklist in the image
+# LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME", "sentinel-db-img") 
+
+# # 2. Hyperparameters
+# MAX_STEPS = 10
+# TEMPERATURE = 0.1  
+# MAX_TOKENS = 150
+
+# # 3. Mandatory Logging Functions
+# def log_start(task: str, env: str, model: str) -> None:
+#     print(f"[START] task={task} env={env} model={model}", flush=True)
+
+# def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
+#     error_val = error if error else "null"
+#     done_val = str(done).lower()
+#     action_clean = action.replace("\n", " ").strip()
+#     # Formatting reward to 2 decimal places as per spec
+#     print(f"[STEP] step={step} action={action_clean} reward={reward:.2f} done={done_val} error={error_val}", flush=True)
+
+# def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
+#     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+#     # Formatting score to 3 decimal places as per sample example
+#     print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
+
+# # 4. LLM Interaction Logic (Your Prompt is already 10/10)
+# def get_model_query(client: OpenAI, observation: str) -> str:
+#     system_prompt = textwrap.dedent("""
+#         [STRICT ROLE]
+#         You are a Database Auditor. You ONLY output one raw SQL statement.
+#         You will be given an observation. If 'current_checksum' is not perfect or duplicates exist, you MUST continue fixing.
+
+#         [DATABASE SCHEMA]
+#         - Table: 'accounts'
+#         - Columns: id (INT), name (TEXT), balance (REAL), status (TEXT)
+
+#         [STRICT CONSTRAINTS]
+#         - NEVER use 'SELECT' to count or check data. I already provide the observation.
+#         - You MUST only use 'UPDATE' or 'DELETE' to change the data.
+#         - NO markdown code blocks (no ```). No explanations.
+#         - Output EXACTLY ONE line of SQL.
+
+#         [REQUIRED ACTION SEQUENCE]
+#         Check the observation and act in this order:
+#         1. FIX NEGATIVES: UPDATE accounts SET balance = 0 WHERE balance < 0;
+#         2. FIX DUPLICATES: DELETE FROM accounts WHERE rowid NOT IN (SELECT MIN(rowid) FROM accounts GROUP BY id);
+#         3. FIX STATUS: UPDATE accounts SET status = 'ACTIVE' WHERE status != 'ACTIVE';
+#         4. IF ALL ISSUES ARE FIXED: SELECT 1;
+#     """).strip()
+
+#     try:
+#         completion = client.chat.completions.create(
+#             model=MODEL_NAME,
+#             messages=[
+#                 {"role": "system", "content": system_prompt},
+#                 {"role": "user", "content": f"Database State: {observation}"},
+#             ],
+#             temperature=TEMPERATURE,
+#             max_tokens=MAX_TOKENS,
+#         )
+#         return (completion.choices[0].message.content or "SELECT 1;").strip()
+#     except Exception as exc:
+#         return f"-- Error: {str(exc)}"
+
+# # 5. Main Execution Loop
+# async def main() -> None:
+#     client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+#     env = SentinelEnv(task_id=TASK_NAME)
+    
+#     history_rewards: List[float] = []
+#     steps_taken = 0
+#     success = False
+#     final_score = 0.0
+
+#     log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
+
+#     try:
+#         # Reset Environment to get initial observation
+#         obs = env.reset(task_id=TASK_NAME)
+        
+#         for step in range(1, MAX_STEPS + 1):
+#             sql_query = get_model_query(client, str(obs))
+#             obs, reward, done, info = env.step(Action(query=sql_query))
+            
+#             history_rewards.append(reward)
+#             steps_taken = step
+#             error = info.get("error")
+
+#             log_step(step=step, action=sql_query, reward=reward, done=done, error=error)
+
+#             if done:
+#                 break
+
+#         # Final Evaluation: Score must be [0, 1]
+#         final_score = history_rewards[-1] if history_rewards else 0.0
+#         success = final_score >= 0.95 
+
+#     except Exception as global_exc:
+#         # Important: The [END] log MUST be emitted even on exception
+#         pass 
+#     finally:
+#         env.close()
+#         log_end(success=success, steps=steps_taken, score=final_score, rewards=history_rewards)
+
+# if __name__ == "__main__":
+#     asyncio.run(main())
+
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -6,7 +129,8 @@ import os
 import textwrap
 from typing import List, Optional
 from openai import OpenAI
-from env import SentinelEnv
+# IMPORTANT: Switching from local import to OpenEnv's Remote client
+from openenv import RemoteEnv 
 from models import Action
 
 # 1. Environment Configuration (Mandatory for the Grader)
@@ -15,15 +139,18 @@ API_BASE_URL = os.getenv("API_BASE_URL", "https://api.groq.com/openai/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
 TASK_NAME = os.getenv("SENTINEL_TASK", "audit_hard")
 BENCHMARK = "sentinel-db-v1"
-# Added to satisfy the mandatory checklist in the image
 LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME", "sentinel-db-img") 
 
-# 2. Hyperparameters
+# 2. KEY CHANGE: Your Live Hugging Face Space URL
+# The validator will use this to talk to your Running container
+SPACE_URL = os.getenv("SPACE_URL", "https://aviralmonke-sentinel-db.hf.space")
+
+# 3. Hyperparameters
 MAX_STEPS = 10
 TEMPERATURE = 0.1  
 MAX_TOKENS = 150
 
-# 3. Mandatory Logging Functions
+# 4. Mandatory Logging Functions
 def log_start(task: str, env: str, model: str) -> None:
     print(f"[START] task={task} env={env} model={model}", flush=True)
 
@@ -31,15 +158,13 @@ def log_step(step: int, action: str, reward: float, done: bool, error: Optional[
     error_val = error if error else "null"
     done_val = str(done).lower()
     action_clean = action.replace("\n", " ").strip()
-    # Formatting reward to 2 decimal places as per spec
     print(f"[STEP] step={step} action={action_clean} reward={reward:.2f} done={done_val} error={error_val}", flush=True)
 
 def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    # Formatting score to 3 decimal places as per sample example
     print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
 
-# 4. LLM Interaction Logic (Your Prompt is already 10/10)
+# 5. LLM Interaction Logic
 def get_model_query(client: OpenAI, observation: str) -> str:
     system_prompt = textwrap.dedent("""
         [STRICT ROLE]
@@ -78,10 +203,13 @@ def get_model_query(client: OpenAI, observation: str) -> str:
     except Exception as exc:
         return f"-- Error: {str(exc)}"
 
-# 5. Main Execution Loop
+# 6. Main Execution Loop
 async def main() -> None:
     client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
-    env = SentinelEnv(task_id=TASK_NAME)
+    
+    # CRITICAL FIX: Initialize as a RemoteEnv connecting to Hugging Face
+    # This prevents the local file system crash in Phase 2
+    env = RemoteEnv(SPACE_URL)
     
     history_rewards: List[float] = []
     steps_taken = 0
@@ -91,12 +219,19 @@ async def main() -> None:
     log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
 
     try:
-        # Reset Environment to get initial observation
-        obs = env.reset(task_id=TASK_NAME)
+        # Reset Environment via Remote API
+        obs = await env.reset(task_id=TASK_NAME)
         
         for step in range(1, MAX_STEPS + 1):
             sql_query = get_model_query(client, str(obs))
-            obs, reward, done, info = env.step(Action(query=sql_query))
+            
+            # Action must be sent as a dictionary/model that matches your Action schema
+            result = await env.step(Action(query=sql_query))
+            
+            obs = result.observation
+            reward = result.reward
+            done = result.done
+            info = result.info
             
             history_rewards.append(reward)
             steps_taken = step
@@ -107,15 +242,14 @@ async def main() -> None:
             if done:
                 break
 
-        # Final Evaluation: Score must be [0, 1]
         final_score = history_rewards[-1] if history_rewards else 0.0
         success = final_score >= 0.95 
 
     except Exception as global_exc:
-        # Important: The [END] log MUST be emitted even on exception
-        pass 
+        # For debugging the Phase 2 validator
+        print(f"[DEBUG] Execution Error: {global_exc}")
     finally:
-        env.close()
+        await env.close()
         log_end(success=success, steps=steps_taken, score=final_score, rewards=history_rewards)
 
 if __name__ == "__main__":
