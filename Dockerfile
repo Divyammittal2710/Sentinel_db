@@ -37,4 +37,4 @@ EXPOSE 7860
 
 # Step 9: Start the FastAPI server (app.py) using Uvicorn
 # This allows the 'validate-submission.sh' script to ping your /reset endpoint
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]
+CMD ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "7860"]
