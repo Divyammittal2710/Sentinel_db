@@ -24,8 +24,10 @@ class SentinelEnv:
 
         # 2. Reset the Active DB from the Template
         if not os.path.exists(self.template_path):
-            raise FileNotFoundError("template.db not found. Run setup_db.py first!")
-
+            print("[DEBUG] template.db not found. Generating on the fly for validator...")
+            os.system("python setup_db.py")
+            time.sleep(1)
+            
         with open(self.template_path, 'rb') as f_src, open(self.db_path, 'wb') as f_dst:
             f_dst.write(f_src.read())
 
