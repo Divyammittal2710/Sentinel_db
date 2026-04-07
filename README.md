@@ -123,16 +123,25 @@ This forces the agent to act decisively. A slow agent will watch its reward degr
 
 **Prerequisites:** Python 3.10+, a Groq API key (free at [console.groq.com](https://console.groq.com))
 
+**Option 1 — using uv (recommended):**
 ```bash
-# Clone the repository
 git clone https://github.com/MishrA-Aviral/Sentinel_db.git
 cd Sentinel_db
+"""then create a python environment using python -m venv venv and activate it using venv\scripts\activate or source venv/bin/activate."""
+pip install uv
+uv sync
+uv run python setup_db.py
+uv run python inference.py
+```
 
-# Install dependencies
+**Option 2 — using pip:**
+```bash
+git clone https://github.com/MishrA-Aviral/Sentinel_db.git
+cd Sentinel_db
 pip install -r requirements.txt
-
-# Generate the template database
 python setup_db.py
+python inference.py
+```
 
 # Set your environment variables
 export HF_TOKEN=your_groq_api_key
