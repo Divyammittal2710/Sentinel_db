@@ -6,8 +6,7 @@ import os
 import textwrap
 from typing import List, Optional
 from openai import OpenAI
-# IMPORTANT: Switching from local import to OpenEnv's Remote client
-from openenv import RemoteEnv 
+from env import SentinelEnv
 from models import Action
 
 # 1. Environment Configuration (Mandatory for the Grader)
@@ -16,32 +15,28 @@ API_BASE_URL = os.getenv("API_BASE_URL", "https://api.groq.com/openai/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
 TASK_NAME = os.getenv("SENTINEL_TASK", "audit_hard")
 BENCHMARK = "sentinel-db-v1"
-LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME", "sentinel-db-img") 
 
-# 2. KEY CHANGE: Your Live Hugging Face Space URL
-# The validator will use this to talk to your Running container
-SPACE_URL = os.getenv("SPACE_URL", "https://aviralmonke-sentinel-db.hf.space")
-
-# 3. Hyperparameters
+# 2. Hyperparameters
 MAX_STEPS = 10
-TEMPERATURE = 0.1  
+TEMPERATURE = 0.1  # Low temperature for precise SQL generation
 MAX_TOKENS = 150
 
-# 4. Mandatory Logging Functions
+# 3. Mandatory Logging Functions
 def log_start(task: str, env: str, model: str) -> None:
     print(f"[START] task={task} env={env} model={model}", flush=True)
 
 def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
     error_val = error if error else "null"
     done_val = str(done).lower()
+    # Ensure action string has no newlines to keep log on one line
     action_clean = action.replace("\n", " ").strip()
     print(f"[STEP] step={step} action={action_clean} reward={reward:.2f} done={done_val} error={error_val}", flush=True)
 
 def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
+    print(f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}", flush=True)
 
-# 5. LLM Interaction Logic
+# 4. LLM Interaction Logic
 def get_model_query(client: OpenAI, observation: str) -> str:
     system_prompt = textwrap.dedent("""
         [STRICT ROLE]
@@ -80,13 +75,13 @@ def get_model_query(client: OpenAI, observation: str) -> str:
     except Exception as exc:
         return f"-- Error: {str(exc)}"
 
-# 6. Main Execution Loop
+# 5. Main Execution Loop
 async def main() -> None:
+    # Initialize OpenAI Client (Pointed to Groq or Meta Endpoint)
     client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
     
-    # CRITICAL FIX: Initialize as a RemoteEnv connecting to Hugging Face
-    # This prevents the local file system crash in Phase 2
-    env = RemoteEnv(SPACE_URL)
+    # Initialize Environment
+    env = SentinelEnv(task_id=TASK_NAME)
     
     history_rewards: List[float] = []
     steps_taken = 0
@@ -96,37 +91,37 @@ async def main() -> None:
     log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
 
     try:
-        # Reset Environment via Remote API
-        obs = await env.reset(task_id=TASK_NAME)
+        # Reset Environment to get initial observation
+        obs = env.reset()
         
         for step in range(1, MAX_STEPS + 1):
+            # Get Action from LLM
             sql_query = get_model_query(client, str(obs))
             
-            # Action must be sent as a dictionary/model that matches your Action schema
-            result = await env.step(Action(query=sql_query))
+            # Execute Action in Environment
+            obs, reward, done, info = env.step(Action(query=sql_query))
             
-            obs = result.observation
-            reward = result.reward
-            done = result.done
-            info = result.info
-            
+            # Tracking
             history_rewards.append(reward)
             steps_taken = step
             error = info.get("error")
 
+            # Mandatory STEP Log
             log_step(step=step, action=sql_query, reward=reward, done=done, error=error)
 
             if done:
                 break
 
+        # Final Evaluation
         final_score = history_rewards[-1] if history_rewards else 0.0
-        success = final_score >= 0.95 
+        success = final_score >= 0.95  # Success if integrity is restored
 
     except Exception as global_exc:
-        # For debugging the Phase 2 validator
         print(f"[DEBUG] Execution Error: {global_exc}")
     finally:
-        await env.close()
+        # Cleanup
+        env.close()
+        # Mandatory END Log
         log_end(success=success, steps=steps_taken, score=final_score, rewards=history_rewards)
 
 if __name__ == "__main__":
