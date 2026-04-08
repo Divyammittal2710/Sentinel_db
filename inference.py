@@ -16,24 +16,22 @@ API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY") or os.getenv("OPENAI_API
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.groq.com/openai/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
 
-if len(sys.argv) > 1 and not sys.argv[1].startswith('-'):
-    TASK_NAME = sys.argv[1]
-else:
-    TASK_NAME = os.getenv("SENTINEL_TASK", "audit_easy")
-
+# Use the environment variable or default to audit_easy
+TASK_NAME = os.getenv("SENTINEL_TASK", "audit_easy")
 BENCHMARK = "sentinel-db-v1"
 MAX_STEPS = 10
 TEMPERATURE = 0.1
 MAX_TOKENS = 150
 
-# Initialize Global App and Env
+# --- 2. INITIALIZATION ---
 app = FastAPI()
+# Initialize the global environment
 env = SentinelEnv(task_id=TASK_NAME)
 client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
-# --- 2. LOGGING ---
-def log_start(task: str, env: str, model: str):
-    print(f"[START] task={task} env={env} model={model}", flush=True)
+# --- 3. LOGGING FUNCTIONS ---
+def log_start(task: str, env_name: str, model: str):
+    print(f"[START] task={task} env={env_name} model={model}", flush=True)
 
 def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]):
     error_val = error if error else "null"
@@ -44,7 +42,7 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]):
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}", flush=True)
 
-# --- 3. AGENT LOGIC ---
+# --- 4. AGENT LOGIC (The "Brain") ---
 def get_model_query(observation: str) -> str:
     system_prompt = textwrap.dedent("""
         [STRICT ROLE]
@@ -69,55 +67,79 @@ def get_model_query(observation: str) -> str:
     except Exception as exc:
         return f"-- Error: {str(exc)}"
 
-async def run_agent():
-    """The background task that performs the 97-minute audit"""
+async def run_autonomous_agent():
+    """The background task that performs the audit autonomously"""
     history_rewards = []
     steps_taken = 0
     success = False
     final_score = 0.0
 
-    log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
+    log_start(task=TASK_NAME, env_name=BENCHMARK, model=MODEL_NAME)
     try:
-        obs = env.reset()
+        # Initial reset for the autonomous run
+        obs = env.reset(task_id=TASK_NAME)
         for step in range(1, MAX_STEPS + 1):
             sql_query = get_model_query(str(obs))
             obs, reward, done, info = env.step(Action(query=sql_query))
+            
             history_rewards.append(reward)
             steps_taken = step
             log_step(step=step, action=sql_query, reward=reward, done=done, error=info.get("error"))
-            if done: break
+            
+            if done:
+                break
         
         final_score = history_rewards[-1] if history_rewards else 0.0
         success = final_score >= 0.95
+    except Exception as e:
+        print(f"[AGENT ERROR] {e}", flush=True)
     finally:
         log_end(success=success, steps=steps_taken, score=final_score, rewards=history_rewards)
 
-# --- 4. API ENDPOINTS ---
+# --- 5. COMPLIANCE ENDPOINTS (Phase 1 Fix) ---
 
 @app.on_event("startup")
 async def startup_event():
-    """Starts the agent as soon as the Space is live"""
-    asyncio.create_task(run_agent())
+    """Starts the autonomous agent in the background when the Space starts"""
+    print("--- SERVER STARTING: Launching Autonomous Agent ---", flush=True)
+    asyncio.create_task(run_autonomous_agent())
+
+@app.post("/reset")
+async def reset_endpoint():
+    """Mandatory for Phase 1 Handshake"""
+    print(f"--- RESET CALLED by Validator ---", flush=True)
+    observation = env.reset(task_id=TASK_NAME)
+    return {"observation": observation}
+
+@app.post("/step")
+async def step_endpoint(action: Action):
+    """Mandatory for Phase 1 Handshake"""
+    observation, reward, done, info = env.step(action)
+    return {
+        "observation": observation,
+        "reward": reward,
+        "done": done,
+        "info": info
+    }
+
+@app.get("/grade/{task_id}")
+def grade_endpoint(task_id: str):
+    """The Score Endpoint requested by the Meta Devs"""
+    try:
+        # Calculate current reward without resetting the DB
+        reward = env._calculate_reward()
+        score = max(0.01, min(0.99, reward))
+        return {"score": score, "reward": score}
+    except Exception as e:
+        return {"score": 0.01, "reward": 0.01}
+
+@app.get("/state")
+def state_endpoint():
+    return {"state": env.state()}
 
 @app.get("/")
 def health_check():
     return {"status": "running", "task": TASK_NAME}
-
-@app.get("/grade/{task_id}")
-def grade_task(task_id: str):
-    """
-    THIS IS THE CRITICAL FIX. 
-    Returns the reward of the current database state to the validator.
-    """
-    try:
-        # Get reward from current state (DO NOT call reset())
-        reward = env._calculate_reward()
-        # Scale score between 0.01 and 0.99
-        score = max(0.01, min(0.99, reward))
-        return {"score": score, "reward": score}
-    except Exception as e:
-        print(f"Grader Error: {e}", flush=True)
-        return {"score": 0.01, "reward": 0.01}
 
 if __name__ == "__main__":
     import uvicorn
