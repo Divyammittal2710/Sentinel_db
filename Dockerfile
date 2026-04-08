@@ -6,5 +6,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 RUN python setup_db.py
 EXPOSE 7860
-ENV PYTHONPATH=.
-CMD ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "7860"]
+# ONE SINGLE COMMAND TO START THE SERVER
+CMD ["uvicorn", "inference:app", "--host", "0.0.0.0", "--port", "7860"]

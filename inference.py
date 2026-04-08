@@ -3,7 +3,7 @@ import sys
 import asyncio
 import textwrap
 from typing import List, Optional
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI
 from openai import OpenAI
 from env import SentinelEnv
 from models import Action
@@ -16,7 +16,6 @@ API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY") or os.getenv("OPENAI_API
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.groq.com/openai/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
 
-# Use the environment variable or default to audit_easy
 TASK_NAME = os.getenv("SENTINEL_TASK", "audit_easy")
 BENCHMARK = "sentinel-db-v1"
 MAX_STEPS = 10
@@ -25,11 +24,11 @@ MAX_TOKENS = 150
 
 # --- 2. INITIALIZATION ---
 app = FastAPI()
-# Initialize the global environment
+# Initialize global env and client
 env = SentinelEnv(task_id=TASK_NAME)
 client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
-# --- 3. LOGGING FUNCTIONS ---
+# --- 3. LOGGING ---
 def log_start(task: str, env_name: str, model: str):
     print(f"[START] task={task} env={env_name} model={model}", flush=True)
 
@@ -42,7 +41,7 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]):
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}", flush=True)
 
-# --- 4. AGENT LOGIC (The "Brain") ---
+# --- 4. AGENT LOGIC ---
 def get_model_query(observation: str) -> str:
     system_prompt = textwrap.dedent("""
         [STRICT ROLE]
@@ -68,7 +67,7 @@ def get_model_query(observation: str) -> str:
         return f"-- Error: {str(exc)}"
 
 async def run_autonomous_agent():
-    """The background task that performs the audit autonomously"""
+    """Background task for agent execution"""
     history_rewards = []
     steps_taken = 0
     success = False
@@ -76,7 +75,6 @@ async def run_autonomous_agent():
 
     log_start(task=TASK_NAME, env_name=BENCHMARK, model=MODEL_NAME)
     try:
-        # Initial reset for the autonomous run
         obs = env.reset(task_id=TASK_NAME)
         for step in range(1, MAX_STEPS + 1):
             sql_query = get_model_query(str(obs))
@@ -96,51 +94,42 @@ async def run_autonomous_agent():
     finally:
         log_end(success=success, steps=steps_taken, score=final_score, rewards=history_rewards)
 
-# --- 5. COMPLIANCE ENDPOINTS (Phase 1 Fix) ---
+# --- 5. ENDPOINTS ---
 
 @app.on_event("startup")
 async def startup_event():
-    """Starts the autonomous agent in the background when the Space starts"""
-    print("--- SERVER STARTING: Launching Autonomous Agent ---", flush=True)
+    """Launch the agent when the server starts"""
     asyncio.create_task(run_autonomous_agent())
 
 @app.post("/reset")
-async def reset_endpoint():
-    """Mandatory for Phase 1 Handshake"""
-    print(f"--- RESET CALLED by Validator ---", flush=True)
-    observation = env.reset(task_id=TASK_NAME)
+async def reset_endpoint(task: dict = None):
+    t_id = task.get("task_id", TASK_NAME) if task else TASK_NAME
+    observation = env.reset(task_id=t_id)
     return {"observation": observation}
 
 @app.post("/step")
 async def step_endpoint(action: Action):
-    """Mandatory for Phase 1 Handshake"""
     observation, reward, done, info = env.step(action)
-    return {
-        "observation": observation,
-        "reward": reward,
-        "done": done,
-        "info": info
-    }
+    return {"observation": observation, "reward": reward, "done": done, "info": info}
 
 @app.get("/grade/{task_id}")
 def grade_endpoint(task_id: str):
-    """The Score Endpoint requested by the Meta Devs"""
     try:
-        # Calculate current reward without resetting the DB
         reward = env._calculate_reward()
         score = max(0.01, min(0.99, reward))
         return {"score": score, "reward": score}
-    except Exception as e:
+    except:
         return {"score": 0.01, "reward": 0.01}
-
-@app.get("/state")
-def state_endpoint():
-    return {"state": env.state()}
 
 @app.get("/")
 def health_check():
     return {"status": "running", "task": TASK_NAME}
 
-if __name__ == "__main__":
+# --- 6. COMPLIANCE ENTRY POINT ---
+def main():
+    """The function the validator is looking for"""
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=7860)
+
+# CRITICAL: We DO NOT call main() or uvicorn.run here. 
+# The Dockerfile handles the startup.
