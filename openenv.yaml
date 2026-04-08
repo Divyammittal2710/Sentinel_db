@@ -1,9 +1,18 @@
 name: sentinel_db
 version: "1.0.0"
+description: >
+  A real-world FinTech database auditing environment for AI agents.
+  The agent must identify and fix data integrity violations (negative balances,
+  duplicate IDs, invalid statuses) in a live SQLite database — optionally under
+  adversarial Chaos Monkey conditions.
+entry_point: server/app.py
 tasks:
   - name: audit_easy
+    description: Fix a static corrupted database with no interference. No chaos monkey.
     max_steps: 10
   - name: audit_medium
+    description: Fix the database while a slow chaos monkey injects duplicates every 8 seconds.
     max_steps: 10
   - name: audit_hard
-    max_steps: 10 
+    description: Fix the database while an aggressive chaos monkey drains balances every 2 seconds.
+    max_steps: 10
