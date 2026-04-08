@@ -1,35 +1,27 @@
+spec_version: 1
 version: "1.0.0"
 name: "sentinel-db"
-description: "Autonomous FinTech database auditor for maintaining financial integrity."
+description: "Autonomous FinTech database auditor."
 entrypoint: "inference.py"
 
 tasks:
   - id: "audit_easy"
     name: "Integrity Restoration"
     difficulty: "easy"
-    description: "Fix a static corrupted financial database with negative balances, duplicate IDs, and invalid statuses."
-    grader:
-      type: "function"
-      entrypoint: "grader:grade"
-      reward_range: [0.0, 1.0]
-
+    description: "Fix a static corrupted financial database."
+    grader: "grader.py"
+    
   - id: "audit_medium"
     name: "Duplicate Reconciliation"
     difficulty: "medium"
-    description: "Fix a corrupted database while a slow chaos monkey drains balances and injects duplicates every 8 seconds."
-    grader:
-      type: "function"
-      entrypoint: "grader:grade"
-      reward_range: [0.0, 1.0]
-
+    description: "Fix a database with a slow chaos monkey."
+    grader: "grader.py"
+    
   - id: "audit_hard"
     name: "Chaos Resilience"
     difficulty: "hard"
-    description: "Fix a corrupted database while a chaos monkey aggressively drains balances every 2 seconds."
-    grader:
-      type: "function"
-      entrypoint: "grader:grade"
-      reward_range: [0.0, 1.0]
+    description: "Fix a database with an aggressive chaos monkey."
+    grader: "grader.py"
 
 runtime:
   engine: "python-3.10"
