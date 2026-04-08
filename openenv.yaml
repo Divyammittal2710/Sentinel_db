@@ -1,27 +1,20 @@
 spec_version: 1
-version: "1.0.0"
-name: "sentinel-db"
-description: "Autonomous FinTech database auditor."
-entrypoint: "inference.py"
+name: sentinel_db
+type: space
+runtime: fastapi
+app: inference:app
+port: 7860
 
 tasks:
-  - id: "audit_easy"
-    name: "Integrity Restoration"
-    difficulty: "easy"
+  - id: audit_easy
     description: "Fix a static corrupted financial database."
-    grader: "grader.py"
-    
-  - id: "audit_medium"
-    name: "Duplicate Reconciliation"
-    difficulty: "medium"
-    description: "Fix a database with a slow chaos monkey."
-    grader: "grader.py"
-    
-  - id: "audit_hard"
-    name: "Chaos Resilience"
-    difficulty: "hard"
-    description: "Fix a database with an aggressive chaos monkey."
-    grader: "grader.py"
+    grader: grade/audit_easy
+  - id: audit_medium
+    description: "Fix a corrupted database with a slow chaos monkey."
+    grader: grade/audit_medium
+  - id: audit_hard
+    description: "Fix a corrupted database with an aggressive chaos monkey."
+    grader: grade/audit_hard
 
 runtime:
   engine: "python-3.10"

@@ -1,4 +1,5 @@
 import sqlite3
+import sys
 import threading
 import time
 import os
@@ -25,7 +26,7 @@ class SentinelEnv:
         # 2. Reset the Active DB from the Template
         if not os.path.exists(self.template_path):
             print("[DEBUG] template.db not found. Generating on the fly for validator...")
-            os.system("python setup_db.py")
+            os.system(f"{sys.executable} setup_db.py")
             time.sleep(1)
             
         with open(self.template_path, 'rb') as f_src, open(self.db_path, 'wb') as f_dst:
@@ -49,7 +50,7 @@ class SentinelEnv:
         """Background thread that corrupts data during Task 3."""
         while not self.stop_monkey.is_set():
             try:
-                conn = sqlite3.connect(self.db_path)
+                conn = sqlite3.connect(self.db_path, timeout=10)
                 conn.execute(
                     "UPDATE accounts SET balance = balance - 5.0 "
                     "WHERE id = (SELECT id FROM accounts ORDER BY RANDOM() LIMIT 1)"
@@ -66,7 +67,7 @@ class SentinelEnv:
         tick = 0
         while not self.stop_monkey.is_set():
             try:
-                conn = sqlite3.connect(self.db_path)
+                conn = sqlite3.connect(self.db_path, timeout=10)
 
                 # Every tick: subtract a small amount from a random account
                 conn.execute(
@@ -90,7 +91,7 @@ class SentinelEnv:
 
     def _get_current_observation(self) -> Observation:
         """Improved: Now identifies BOTH negatives and duplicates for the Agent."""
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=10)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
@@ -124,10 +125,9 @@ class SentinelEnv:
             conn.close()
 
     def _calculate_reward(self) -> float:
-        """The Programmatic Grader: Normalizes integrity to 0.0 - 1.0 range."""
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=10)
         cursor = conn.cursor()
-
+        
         cursor.execute("SELECT COUNT(*) FROM accounts WHERE balance < 0")
         neg_balances = cursor.fetchone()[0]
 
@@ -136,7 +136,9 @@ class SentinelEnv:
         conn.close()
 
         total_issues = neg_balances + duplicates
-        score = max(0.0, 1.0 - (total_issues / 50.0))
+    
+        # Using 1000.0 ensures the score moves even if only 1-2 rows are fixed
+        score = max(0.0, 1.0 - (total_issues / 1000.0))
         return float(score)
 
     def step(self, action: Action):
@@ -146,7 +148,7 @@ class SentinelEnv:
 
         if action.query:
             try:
-                conn = sqlite3.connect(self.db_path)
+                conn = sqlite3.connect(self.db_path, timeout=10)
                 conn.executescript(action.query)
                 conn.close()
             except Exception as e:
