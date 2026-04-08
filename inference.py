@@ -17,72 +17,69 @@ API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY") or os.getenv("OPENAI_API
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.groq.com/openai/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
 TASK_NAME = os.getenv("SENTINEL_TASK", "audit_easy")
-BENCHMARK = "sentinel-db-v1"
 
-# --- 2. LOGGING (The Validator's Requirements) ---
-def log_start():
-    print(f"[START] task={TASK_NAME} env={BENCHMARK} model={MODEL_NAME}", flush=True)
-
-def log_step(step: int, query: str, reward: float, done: bool):
-    q_clean = query.replace("\n", " ").strip()
-    print(f"[STEP] step={step} action={q_clean} reward={reward:.2f} done={str(done).lower()}", flush=True)
-
-def log_end(success: bool, steps: int, score: float, rewards: List[float]):
-    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    print(f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}", flush=True)
-    # Redundant end tag for stricter parsers
-    print(f"[END] task={TASK_NAME} score={score:.2f} steps={steps}", flush=True)
-
-# --- 3. THE AGENT ---
+# --- 2. THE AGENT (Hardened & Tagged) ---
 async def run_autonomous_agent(env_instance):
-    print("--- Background Agent: Starting Audit ---", flush=True)
+    """Provides the [START]/[STEP]/[END] logs for the validator's parser."""
+    print("--- Sentinel Agent: Booting Background Task ---", flush=True)
     if not API_KEY:
-        print("[ERROR] No API Key. Server staying up for validator.", flush=True)
+        print("[CRITICAL] API Key missing. Server idling for evaluation.", flush=True)
         return
 
     client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
     history_rewards = []
     
     try:
-        log_start()
+        # Strict [START] tag
+        print(f"[START] task={TASK_NAME} model={MODEL_NAME}", flush=True)
         obs = env_instance.reset(task_id=TASK_NAME)
         
         for step in range(1, 11):
-            # Brain logic
-            prompt = "You are a Database Auditor. Output ONE raw SQL statement to fix negatives/duplicates."
+            # Precision Prompting to avoid "hallucinated" table names
+            prompt = textwrap.dedent("""
+                You are a Database Auditor. Output ONE raw SQL statement.
+                Goal: Fix negative balances and remove duplicates in 'accounts'.
+                Rule: No prose, no markdown, just SQL.
+            """).strip()
+            
             completion = client.chat.completions.create(
                 model=MODEL_NAME,
                 messages=[{"role": "system", "content": prompt}, {"role": "user", "content": f"State: {obs}"}],
-                temperature=0.1, max_tokens=150
+                temperature=0.1, max_tokens=100
             )
             query = (completion.choices[0].message.content or "SELECT 1;").strip()
+            # Clean Markdown if the LLM ignores the rule
+            query = query.replace("```sql", "").replace("```", "").strip()
             
-            # Action
+            # Step the environment
             obs, reward, done, info = env_instance.step(Action(query=query))
             history_rewards.append(reward)
             
-            # THE LOGGING THE VALIDATOR WANTS
-            log_step(step, query, reward, done)
+            # Strict [STEP] tag
+            print(f"[STEP] step={step} action={query[:60]} reward={reward:.2f} done={str(done).lower()}", flush=True)
             
             if done: break
             await asyncio.sleep(1)
 
         final_score = history_rewards[-1] if history_rewards else 0.0
-        log_end(success=(final_score >= 0.90), steps=len(history_rewards), score=final_score, rewards=history_rewards)
+        # Strict [END] tag
+        print(f"[END] success={str(final_score >= 0.90).lower()} steps={len(history_rewards)} score={final_score:.2f}", flush=True)
         
     except Exception as e:
         print(f"[AGENT ERROR] {e}", flush=True)
 
-# --- 4. LIFESPAN & SERVER ---
+# --- 3. LIFESPAN MANAGER ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    agent_task = asyncio.create_task(run_autonomous_agent(env))
+    # Start the agent background task automatically
+    task = asyncio.create_task(run_autonomous_agent(env))
     yield
-    agent_task.cancel()
+    task.cancel()
 
 app = FastAPI(lifespan=lifespan)
 env = SentinelEnv(task_id=TASK_NAME)
 
+# --- 4. ENDPOINTS ---
 @app.post("/reset")
 async def reset_endpoint(task: dict = None):
     return {"observation": env.reset(task_id=TASK_NAME)}
@@ -92,18 +89,15 @@ async def step_endpoint(action: Action):
     observation, reward, done, info = env.step(action)
     return {"observation": observation, "reward": reward, "done": done, "info": info}
 
-@app.get("/grade/{task_id}")
-def grade_endpoint(task_id: str):
-    reward = env._calculate_reward()
-    return {"score": reward, "reward": reward}
-
 @app.get("/")
-def health():
+async def health():
     return {"status": "running"}
 
+# --- 5. THE ENTRY POINT ---
 def main():
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=7860)
+    # Single point of truth for the server
+    uvicorn.run(app, host="0.0.0.0", port=7860, log_level="info")
 
 if __name__ == "__main__":
     main()
