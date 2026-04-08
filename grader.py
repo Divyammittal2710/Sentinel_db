@@ -30,11 +30,11 @@ def grade(state=None, **kwargs) -> float:
         conn.close()
         
         if negatives == 0 and duplicates == 0 and corrupts == 0:
-            return 1.0
-        return 0.0
+            return 0.99  # perfect — strictly < 1.0 as required by validator
+        return 0.01      # failed  — strictly > 0.0 as required by validator
         
     except Exception:
-        return 0.0
+        return 0.01
 
 if __name__ == "__main__":
     print(grade())
