@@ -26,12 +26,12 @@ class SentinelEnv:
 
         with self.lock:
             time.sleep(0.2)
-            if os.path.exists(self.template_path):
-                shutil.copyfile(self.template_path, self.db_path)
-            else:
-                raise FileNotFoundError(
-                    "template.db not found — did you run setup_db.py?"
-                )
+            if not os.path.exists(self.template_path):
+                # Auto-generate template.db if it doesn't exist
+                # (happens when the validator runs inference.py directly)
+                from setup_db import create_expanded_db
+                create_expanded_db()
+            shutil.copyfile(self.template_path, self.db_path)
 
         # Start chaos monkey for medium / hard tasks
         if self.task_id in ("audit_medium", "audit_hard"):
