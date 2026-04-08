@@ -1,30 +1,37 @@
 import sys
 import os
-import uvicorn
-from openenv.core.env_server import create_fastapi_app
+import asyncio
+from fastapi import FastAPI
+from pydantic import BaseModel
 
-<<<<<<< HEAD
-# Ensure root is in sys.path
-root_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if root_path not in sys.path:
-    sys.path.insert(0, root_path)
-=======
 # Put root in path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
->>>>>>> 2da2d79add4e0c58f565339351f2fd6e49ac4235
 
 from env import SentinelEnv
 from models import Action, Observation
 
-<<<<<<< HEAD
-app = create_fastapi_app(SentinelEnv, Action, Observation)
+app = FastAPI()
+env = SentinelEnv()
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=7860)
-=======
-# The SDK expects the class, and the Pydantic models for Action and Observation
-app = create_fastapi_app(SentinelEnv, Action, Observation)
+@app.post("/reset")
+async def reset(task: dict = None):
+    # Flexible task handling to prevent Phase 1 errors
+    task_id = "audit_easy"
+    if task and "task_id" in task:
+        task_id = task["task_id"]
+    obs = env.reset(task_id=task_id)
+    return {"observation": obs}
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=7860) 
->>>>>>> 2da2d79add4e0c58f565339351f2fd6e49ac4235
+@app.post("/step")
+async def step(action: Action):
+    obs, reward, done, info = env.step(action)
+    return {"observation": obs, "reward": reward, "done": done, "info": info}
+
+@app.get("/grade/{task_id}")
+async def grade(task_id: str):
+    reward = env._calculate_reward()
+    return {"score": reward, "reward": reward}
+
+@app.get("/")
+async def health():
+    return {"status": "running"}
